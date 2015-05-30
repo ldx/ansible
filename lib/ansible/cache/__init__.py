@@ -17,15 +17,15 @@
 
 from collections import MutableMapping
 
-from ansible import utils
 from ansible import constants as C
 from ansible import errors
+from ansible.utils.plugins import cache_loader
 
 
 class FactCache(MutableMapping):
 
     def __init__(self, *args, **kwargs):
-        self._plugin = utils.plugins.cache_loader.get(C.CACHE_PLUGIN)
+        self._plugin = cache_loader.get(C.CACHE_PLUGIN)
         if self._plugin is None:
             return
 

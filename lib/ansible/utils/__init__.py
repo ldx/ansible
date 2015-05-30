@@ -30,6 +30,7 @@ from ansible.utils.display_functions import *
 from ansible.utils.plugins import *
 from ansible.utils.su_prompts import *
 from ansible.utils.hashing import secure_hash, secure_hash_s, checksum, checksum_s, md5, md5s
+from ansible.cache import FactCache
 from ansible.callbacks import display
 from ansible.module_utils.splitter import split_args, unquote
 from ansible.module_utils.basic import heuristic_log_sanitize
@@ -759,19 +760,32 @@ def parse_yaml_from_file(path, vault_password=None):
     data = None
     show_content = True
 
-    try:
-        data = open(path).read()
-    except IOError:
-        raise errors.AnsibleError("file could not read: %s" % path)
+    key = 'VAULT-%s' % path
+    cache = FactCache()
+    mtime = os.path.getmtime(path)
+    cached_data = cache.get(key, None)
+    cached_mtime = None
+    if cached_data is not None:
+        data = cached_data['data']
+        cached_mtime = float(cached_data['mtime'])
 
-    vault = VaultLib(password=vault_password)
-    if vault.is_encrypted(data):
-        # if the file is encrypted and no password was specified,
-        # the decrypt call would throw an error, but we check first
-        # since the decrypt function doesn't know the file name
-        if vault_password is None:
-            raise errors.AnsibleError("A vault password must be specified to decrypt %s" % path)
-        data = vault.decrypt(data)
+    if cached_mtime is None or cached_mtime < mtime:
+        try:
+            data = open(path).read()
+        except IOError:
+            raise errors.AnsibleError("file could not read: %s" % path)
+
+        vault = VaultLib(password=vault_password)
+        if vault.is_encrypted(data):
+            # if the file is encrypted and no password was specified,
+            # the decrypt call would throw an error, but we check first
+            # since the decrypt function doesn't know the file name
+            if vault_password is None:
+                raise errors.AnsibleError("A vault password must be specified to decrypt %s" % path)
+            data = vault.decrypt(data)
+            show_content = False
+            update_hash(cache, key, {'data': data, 'mtime': mtime})
+    else:
         show_content = False
 
     try:
