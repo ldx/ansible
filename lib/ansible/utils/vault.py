@@ -69,6 +69,15 @@ try:
 except ImportError:
     HAS_AES = False    
 
+# OpenSSL pbkdf2_hmac
+HAS_PBKDF2_HMAC = False
+try:
+    from OpenSSL.crypto import pbkdf2_hmac
+    if pbkdf2_hmac is not None:
+        HAS_PBKDF2_HMAC = True
+except ImportError:
+    pass
+
 CRYPTO_UPGRADE = "ansible-vault requires a newer version of pycrypto than the one installed on your platform. You may fix this with OS-specific commands such as: yum install python-devel; rpm -e --nodeps python-crypto; pip install pycrypto"
 
 HEADER='$ANSIBLE_VAULT'
@@ -488,21 +497,29 @@ class VaultAES256(object):
         if not HAS_PBKDF2 or not HAS_COUNTER or not HAS_HASH:
             raise errors.AnsibleError(CRYPTO_UPGRADE)
 
-    def gen_key_initctr(self, password, salt):
-        # 16 for AES 128, 32 for AES256
-        keylength = 32
-
-        # match the size used for counter.new to avoid extra work
-        ivlength = 16 
-
+    def create_key(self, password, salt, keylength, ivlength):
         hash_function = SHA256
 
         # make two keys and one iv
         pbkdf2_prf = lambda p, s: HMAC.new(p, s, hash_function).digest()
 
-
-        derivedkey = PBKDF2(password, salt, dkLen=(2 * keylength) + ivlength, 
+        derivedkey = PBKDF2(password, salt, dkLen=(2 * keylength) + ivlength,
                             count=10000, prf=pbkdf2_prf)
+        return derivedkey
+
+    def gen_key_initctr(self, password, salt):
+        # 16 for AES 128, 32 for AES256
+        keylength = 32
+
+        # match the size used for counter.new to avoid extra work
+        ivlength = 16
+
+        if HAS_PBKDF2_HMAC:
+            derivedkey = pbkdf2_hmac(password, salt,
+                                     10000, 2 * keylength + ivlength,
+                                     'sha256')
+        else:
+            derivedkey = self.create_key(password, salt, keylength, ivlength)
 
         key1 = derivedkey[:keylength]
         key2 = derivedkey[keylength:(keylength * 2)]
